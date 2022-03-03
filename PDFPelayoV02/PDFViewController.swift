@@ -7,27 +7,209 @@
 
 import UIKit
 import PDFKit
+import MobileCoreServices
+import UniformTypeIdentifiers
 
-class PDFViewController: UIViewController {
+class PDFViewController: UIViewController, UIDocumentPickerDelegate {
+    
+    private let collectionView: UICollectionView = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewCompositionalLayout(sectionProvider: { _, _ -> NSCollectionLayoutSection? in
+        let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .fractionalHeight(1.0)))
+        item.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 7, bottom: 2, trailing: 7)
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(150)), subitem: item, count: 2)
+        group.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 0, bottom: 30, trailing: 0)
+        return NSCollectionLayoutSection(group: group)
+    }))
 
-   
+    private var pdfView: PDFView!
+    
+    private var urlArray = [URL]()
+    
+    let defaultsForUrlArray = UserDefaults.standard
+    
+    var arrURLS = [String]()
+    
+    var pdfImage = [UIImage]()
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
-         let pdfView = PDFView(frame: self.view.bounds)
-        //pdfView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(pdfView)
+        title = "Home"
+        view.backgroundColor = .systemBackground
+        view.addSubview(collectionView)
+        collectionView.delegate = self
+        collectionView.dataSource = self
+        collectionView.backgroundColor = .systemBackground
+        collectionView.register(PDFImageCell.self, forCellWithReuseIdentifier: PDFImageCell.identifier)
         
-        let documentURL = Bundle.main.url(forResource: "21", withExtension: "pdf")
+        
+        pdfView = PDFView(frame: self.view.bounds)
+        pdfView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        //view.addSubview(pdfView)
+
+        let documentURL = Bundle.main.url(forResource: "blender", withExtension: "pdf")
         if let document = PDFDocument(url: documentURL!) {
             pdfView.document = document
+            pdfView.currentPage?.addAnnotation(addText())
+            
+            if let attributes = document.documentAttributes {
+                let keys = attributes.keys
+                let firstKey = keys[keys.startIndex]
+                
+                
+            }
+           
+
+        }
+        
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(didTapAdd))
+        
+        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .bookmarks, target: self, action: #selector(didTapActionPDF))
+        
+        
+        arrURLS = defaultsForUrlArray.stringArray(forKey: "SavedURLStrings") ?? [String]()
+        
+       
+       
+        
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView.frame = view.bounds
+    }
+    
+
+    
+    func drawPDFfromURL(url: URL) -> UIImage? {
+        guard let document = CGPDFDocument(url as CFURL) else { return nil }
+        guard let page = document.page(at: 1) else { return nil }
+
+        let pageRect = page.getBoxRect(.mediaBox)
+        let renderer = UIGraphicsImageRenderer(size: pageRect.size)
+        let img = renderer.image { ctx in
+            UIColor.white.set()
+            ctx.fill(pageRect)
+
+            ctx.cgContext.translateBy(x: 0.0, y: pageRect.size.height)
+            ctx.cgContext.scaleBy(x: 1.0, y: -1.0)
+
+            ctx.cgContext.drawPDFPage(page)
+        }
+
+        return img
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.addObserver(self, selector: #selector(appMovedToBackground), name: UIApplication.didBecomeActiveNotification, object: nil)
+        
+        collectionView.reloadData()
+        
+      
+    }
+    
+    @objc func appMovedToBackground() {
+        print("App moved to background!")
+        let defaults = UserDefaults(suiteName: "group.miguelhoracio.PDFPelayoV02")
+        guard let pdfURL = defaults?.url(forKey: "pdfUrl") else {
+            return
+        }
+        
+        if let document = PDFDocument(url: pdfURL) {
+            pdfView.document = document
+            urlArray.append(pdfURL)
+            pdfImage.append(drawPDFfromURL(url: pdfURL)!)
+         
+            
+            
+        }
+        collectionView.reloadData()
+    }
+    
+    @objc func didTapActionPDF() {
+        let defaults = UserDefaults(suiteName: "group.miguelhoracio.PDFPelayoV02")
+        guard let pdfURL = defaults?.url(forKey: "pdfUrl") else {
+            return
+        }
+        
+        if let document = PDFDocument(url: pdfURL) {
+            pdfView.document = document
+            
         }
         
         
+    }
+    
+    @objc func didTapAdd() {
+        
+            let types = UTType.types(tag: "pdf",
+                                     tagClass: UTTagClass.filenameExtension,
+                                     conformingTo: nil)
+            let documentPickerController = UIDocumentPickerViewController(
+                    forOpeningContentTypes: types)
+            documentPickerController.delegate = self
+            self.present(documentPickerController, animated: true, completion: nil)
         
     }
 
+    private func addText() -> PDFAnnotation {
+        let text = PDFAnnotation(bounds: CGRect(x: 100, y: 100, width: 100, height: 100), forType: .widget, withProperties: nil)
+        text.backgroundColor = .lightGray
+        text.font = UIFont.systemFont(ofSize: 18)
+        text.widgetStringValue = "Enter your text"
+        text.widgetFieldType = .text
+        return text
+    }
+    
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let selectedFile = urls.first else {
+            return
+        }
+        guard selectedFile.startAccessingSecurityScopedResource() else {
+            print("Error: could not access content of url \(selectedFile)")
+            return
+        }
+     
+        guard  let pdfDocument = PDFDocument(url: selectedFile) else {
+            print("Error: could not create pdfdocument from \(selectedFile)")
+            return
+        }
+            pdfView.displayMode = .singlePageContinuous
+            pdfView.autoScales = true
+            pdfView.displayDirection = .vertical
+            pdfView.backgroundColor = .blue
+            pdfView.document = pdfDocument
+       
+       
+        
+    }
 
 }
+
+extension PDFViewController: UICollectionViewDelegate, UICollectionViewDataSource {
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        return 1
+    }
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return urlArray.count
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PDFImageCell.identifier, for: indexPath) as? PDFImageCell else {
+            return UICollectionViewCell()
+        }
+        let defaults = UserDefaults(suiteName: "group.miguelhoracio.PDFPelayoV02")
+        let pdfURL = defaults?.url(forKey: "pdfUrl") ?? URL(fileURLWithPath: "")
+        
+       
+        cell.pdfImageView.image = pdfImage[indexPath.row]
+        cell.titleLabel.text = urlArray[indexPath.row].lastPathComponent
+        return cell
+    }
+    
+    
+}
+
 
